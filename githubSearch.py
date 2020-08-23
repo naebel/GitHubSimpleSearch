@@ -23,8 +23,7 @@
 # 6. Run `<path to python executable> <path to this file>/<this filename>`
 #       - Adding a `-g` to the end will start up the GUI version.
 # 7. Follow the instructions as they appear on the terminal/GUI.
-#       - Specifically for the GUI, clicking the `Search` button is the only way to
-#         start the search.
+#       - GUI search works with both hitting the enter key and clicking the `Search` button.
 #       - Searching does take some time, depending on the internet connection/size
 #         of the results.
 
@@ -232,7 +231,7 @@ def getReposForUser(username):
 
                 #check to make sure it belongs to the author and check the time
                 try:
-                    committerUsername = commit['committer']['login']
+                    committerUsername = commit['author']['login']
                 except TypeError as e:
                     #probably not a real commit/not one attached to a person. Ignore.
                     errors.append(e)
@@ -242,7 +241,7 @@ def getReposForUser(username):
                 if committerUsername == username:
                     numberOfCommits += 1
                     try:
-                        dateString = commit['commit']['committer']['date']
+                        dateString = commit['commit']['author']['date']
                         # print(dateString) #datestring I'm getting is several hours off
                         # of what GitHub says sometimes. Possibly due to timezone
                         # difference between user and the GitHub server.
@@ -417,7 +416,7 @@ def guiMain(args):
     errorScroll.config(command=errorBox.yview)
     errorBox.config(yscrollcommand=errorScroll.set)
 
-    def performSearch():
+    def performSearch(*argv):
         queryLabelText.set("")
         resultBox.delete("1.0", END)
         errorBox.delete("1.0", END)
@@ -491,6 +490,7 @@ def guiMain(args):
         errorBox.insert(INSERT, errorText)
 
     startButton = Button(searchFrame, text="Search", width=32, command=performSearch)
+    searchInputBox.bind('<Return>', performSearch)
     startButton.pack()
     queryLabelText = StringVar()
     queryLabel = Label(top, textvariable=queryLabelText)
