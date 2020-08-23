@@ -21,14 +21,20 @@
 # 4. Pull the code
 # 5. Open terminal/cmd/powershell
 # 6. Run `<path to python executable> <path to this file>/<this filename>`
-# 7. Follow the instructions as they appear on the terminal.
+#       - Adding a `-g` to the end will start up the GUI version.
+# 7. Follow the instructions as they appear on the terminal/GUI.
+#       - Specifically for the GUI, clicking the `Search` button is the only way to
+#         start the search.
+#       - Searching does take some time, depending on the internet connection/size
+#         of the results.
 
 import os
 import re
 import sys
 import time
+from tkinter import *
 import argparse
-import requests # must `pip install requests` library
+import requests
 # from pprint import pprint
 from datetime import datetime
 
@@ -134,7 +140,7 @@ def getReposForUser(username):
     # Parse for repos user has made at least one commit to.
     # Returns dictionary with full repo names as keys with a dictionary
     # containing the number of commits and date of last commit of specified user.
-    # ex. {<repoName>: {{'Number of Commits':numberOfCommits, 'Last Commit':latestDate}}}
+    # ex. {<repoName>: {{'Total Commits':totalCommits, 'Last Commit':latestDate}}}
 
     checkInput(username)
 
@@ -158,6 +164,7 @@ def getReposForUser(username):
     errors = []
 
     for rep in repos:
+        # print(rep.get('full_name'))
         # pprint(rep)
         #Counts for commits across all of the repos branches
         numberOfCommits = 0
@@ -225,64 +232,67 @@ def getReposForUser(username):
 
                 #check to make sure it belongs to the author and check the time
                 try:
-                    commitAuthorInfo = commit['commit']['author']
+                    committerUsername = commit['committer']['login']
                 except TypeError as e:
                     #probably not a real commit/not one attached to a person. Ignore.
                     errors.append(e)
                     # pprint(commit)
                     # pprint(commits)
                     continue
-                if commitAuthorInfo.get('name') == username:
+                if committerUsername == username:
                     numberOfCommits += 1
-                    dateString = commitAuthorInfo.get('date')
-                    # print(dateString) #datestring I'm getting is a day ahead
-                    #of what GitHub says sometimes?!
-                    commitDate = datetime.strptime(dateString, "%Y-%m-%dT%H:%M:%SZ")
-                    if not latestDate:
-                        latestDate = commitDate
-                    elif commitDate > latestDate:
-                        latestDate = commitDate
+                    try:
+                        dateString = commit['commit']['committer']['date']
+                        # print(dateString) #datestring I'm getting is several hours off
+                        # of what GitHub says sometimes. Possibly due to timezone
+                        # difference between user and the GitHub server.
+                        commitDate = datetime.strptime(dateString,
+                                                       "%Y-%m-%dT%H:%M:%SZ")
+                        if not latestDate:
+                            latestDate = commitDate
+                        elif commitDate > latestDate:
+                            latestDate = commitDate
+                    except Exception as e:
+                        errors.append(e)
 
             # pprint(commits)
         # At least one commit from the user was in the repo
         if numberOfCommits:
-            #full name listed instead of just name, in case there are multiple of the same name repo
-            repoDict[rep.get('full_name')] = {'Number of Commits':numberOfCommits,
+            #full name listed instead of just name, in case there are multiple
+            # of the same name repo
+            repoDict[rep.get('full_name')] = {'Total Commits':numberOfCommits,
                                           'Last Commit':latestDate}
-            # print(f"Repo: {rep['full_name']}\n\tNumber of Commits: {numberOfCommits}\n\tLast Commit: {latestDate}")
 
     return repoDict, errors
+
+def strUserInfo(userDict, fill=45):
+    line = ""
+    line += f"{userDict.get('Username'): <{fill}}" if userDict.get('Username') else f"{'': <{fill}}"
+    line += f" {userDict.get('Real Name'): <{fill}}" if userDict.get('Real Name') else f"{'': <{fill}}"
+
+    if userDict.get('Email'):
+        line +=f" {userDict.get('Email')}"
+    return line
 
 ################################## View ########################################
 
 ### Command line View ####
 
-def printUserInfo(userDict):
-    line = "Username: "
-    line += f"{userDict.get('Username')}\t" if userDict.get('Username') else "     \t"
-    line += 'Real Name: '
-    line += f"{userDict.get('Real Name')}\t" if userDict.get('Real Name') else "     \t"
-
-    if userDict.get('Email'):
-        line +=f"\tEmail: {userDict.get('Email')}"
-    print(line)
-
-
 def cmdMain(args):
-    print("Welcome to this simple GitHub search. I hope you find what you are looking for!\n")
-    print("Before starting, please make sure to add the environment variable "
-          "'GITHUB_TOKEN' with a personal access token generated at "
-          "'https://github.com/settings/tokens' as the value. Then restart the "
-          "terminal and rerun the program.\n\n")
-    print("Ready?\n")
-    time.sleep(1)
-    print("Pefect!")
-    time.sleep(1)
+    print("Welcome to this simple GitHub search.\n"
+          "I hope you find what you are looking for!\n")
+    if not os.getenv('GITHUB_TOKEN'):
+        print("Authorization token not present.\nPlease make sure to add the "
+              "environment variable 'GITHUB_TOKEN' with a personal access token "
+              "generated at 'https://github.com/settings/tokens' as the value.")
+        return
 
     keepGoing = True
+    fill = 40
+    intFill = 20
 
     while(keepGoing):
-        print("\n\n***********************************************************\n\n")
+        print("\n\n*******************************************************\n\n")
         print("What kind of search would you like to run?")
         print("(Enter 'O'/'o' to list the members of a GitHub organization.\n"
               "Enter 'U'/'u' to list repositories and commit counts of a GitHub user.\n"
@@ -300,9 +310,12 @@ def cmdMain(args):
             try:
                 mDict, errors = getOrgMembers(orgName)
                 print(f"\nMembers for '{orgName}':")
+                print(f"{'------Usernames------': <{fill}} "
+                      f"{'------Real Names------': <{fill}} "
+                      "------Emails------\n")
                 if mDict:
                     for m in mDict:
-                        printUserInfo(m)
+                        print(strUserInfo(m, fill))
                     print(f"\nTotal members for organization '{orgName}': {len(mDict)}")
                 else:
                     print(f"\nNo public members for organization '{orgName}'")
@@ -326,12 +339,16 @@ def cmdMain(args):
                 rDict, errors2 = getReposForUser(username)
                 #numbers and dates are off by one sometimes...
                 print("")
-                printUserInfo(uDict)
+                print(strUserInfo(uDict))
 
                 if rDict:
-                    print("\nRepos committed to:\n")
+                    print(f"{'------Repo Name------': <{fill}} "
+                          f"{'---Total Commits---': <{intFill}} "
+                          "-----Last Commit-----\n")
                     for r in rDict:
-                        print(f"Repo: {r}\tNumber of Commits: {rDict[r]['Number of Commits']}\tLast Commit: {rDict[r]['Last Commit']}")
+                        print(f"Repo: {r: <{fill}} "
+                              f"{rDict[r]['Total Commits']: <{intFill}} "
+                              f"{rDict[r]['Last Commit']}")
                 else:
                     print("No repos with commits found for user")
 
@@ -350,10 +367,149 @@ def cmdMain(args):
 
 
 def guiMain(args):
-    print("GUI version is not implemented. Going to command line version.")
-    cmdMain(args)
+    top = Tk()
+    top.title("Simple Git Hub Search")
+    top.geometry("1110x500")
+    header = Label(top, padx=20, pady=10, text="Welcome to this simple GitHub search.\n"
+                                               "I hope you find what you are looking for!")
+    header.pack()
+    if not os.getenv('GITHUB_TOKEN'):
+        authWarning = Message(top, width=300, justify=CENTER, bg='red',
+                              text="Authorization token not present.\nPlease "
+                                   "make sure to add the environment variable "
+                                   "'GITHUB_TOKEN' with a personal access token "
+                                   "generated at 'https://github.com/settings/tokens' "
+                                   "as the value and start the application over.")
+        authWarning.pack()
+        top.mainloop()
+        return
+
+    optionFrame = Frame(top)
+    optionFrame.pack()
+    radioFrame = Frame(optionFrame)
+    radioFrame.pack(side=LEFT)
+    searchType = StringVar()
+    orgRadio = Radiobutton(radioFrame, variable=searchType, value='org',
+                           text='List members of specified organization.')
+    orgRadio.pack(anchor=W)
+    userRadio = Radiobutton(radioFrame, variable=searchType, value='user',
+                            text='List repositories of specified user.')
+    userRadio.pack(anchor=W)
+    searchType.set('org')
+
+    searchFrame = Frame(optionFrame)
+    searchFrame.pack(side=RIGHT)
+    searchInputBox = Entry(searchFrame, width=39)
+    searchInputBox.pack()
+
+    # results = ""
+    resultFrame = Frame(top)
+    resultBox = Text(resultFrame, width=45, height=10, relief=SUNKEN)
+    resultScroll = Scrollbar(resultFrame)
+    resultScroll.pack(side=RIGHT, fill=Y)
+    resultScroll.config(command=resultBox.yview)
+    resultBox.config(yscrollcommand=resultScroll.set)
+
+    errorFrame = Frame(top)
+    errorBox = Text(errorFrame,height=5, relief=SUNKEN)
+    errorScroll = Scrollbar(errorFrame)
+    errorScroll.pack(side=RIGHT, fill=Y)
+    errorScroll.config(command=errorBox.yview)
+    errorBox.config(yscrollcommand=errorScroll.set)
+
+    def performSearch():
+        queryLabelText.set("")
+        resultBox.delete("1.0", END)
+        errorBox.delete("1.0", END)
+        resultBox.insert(INSERT,"This may take some time. Please wait.\n"
+                                "Thank you for your patience!")
+        top.update()
+
+        errorText = ""
+        labelText = ""
+        fill = 40
+        intFill = 20
+        if searchType.get() == 'org':
+            orgName = searchInputBox.get()
+            labelText = f"Members for '{orgName}':\n"
+            memberText = ""
+            try:
+                memberText += f"{'------Usernames------': <{fill}} "
+                memberText += f"{'------Real Names------': <{fill}} "
+                memberText += "------Emails------\n"
+                mDict, errors = getOrgMembers(orgName)
+                if mDict:
+                    for m in mDict:
+                        memberText += f"{strUserInfo(m, fill)}\n"
+                    labelText += "\nTotal members for organization "
+                    labelText +=  f"'{orgName}': {len(mDict)}"
+                else:
+                    labelText += f"\nNo public members for organization '{orgName}'"
+
+                if errors:
+                    for e in errors:
+                        errorText += f"{str(e)}\n"
+            except Exception as err:
+                errorText = "\nCould not obtain members for organization "
+                errorText += f"'{orgName}'\n{str(err)}"
+            queryLabelText.set(labelText)
+            resultBox.delete("1.0", END)
+            resultBox.insert(INSERT, memberText)
+        else:
+            repoText = ""
+            try:
+                repoText = f"{'------Repo Name------': <{fill}} "
+                repoText += f"{'---Total Commits---': <{intFill}} "
+                repoText += '-----Last Commit-----\n'
+                username = searchInputBox.get()
+                uDict = getUserInfo(username)
+                rDict, errors2 = getReposForUser(username)
+
+                labelText = strUserInfo(uDict)
+
+                if rDict:
+                    labelText +="\nRepos committed to:"
+                    for r in rDict:
+                        repoText += f"{r: <{fill}} "
+                        repoText += f"{rDict[r]['Total Commits']: <{intFill}} "
+                        repoText += f" {rDict[r]['Last Commit']}\n"
+                else:
+                    labelText += "\nNo repos with commits found for user"
+
+                if errors2:
+                    for e2 in errors2:
+                        errorText += f"{str(e2)}\n"
+
+            except Exception as err2:
+                    errorText = "Could not obtain repositories for user "
+                    errorText += f"'{username}'\n{str(err2)}"
+            queryLabelText.set(labelText)
+            resultBox.delete("1.0", END)
+            resultBox.insert(INSERT, repoText)
+
+        errorBox.delete("1.0", END)
+        errorBox.insert(INSERT, errorText)
+
+    startButton = Button(searchFrame, text="Search", width=32, command=performSearch)
+    startButton.pack()
+    queryLabelText = StringVar()
+    queryLabel = Label(top, textvariable=queryLabelText)
+    queryLabel.pack()
+
+    resultScroll.pack(side=RIGHT, fill=Y)
+
+    resultBox.pack(side=LEFT, expand=True, fill=BOTH)
+    resultFrame.pack(expand=True, fill=BOTH)
 
 
+    errorLabel = Label(top, text='Errors from query:')
+    errorLabel.pack()
+
+    errorBox.pack(side=LEFT,expand=True, fill=X)
+    errorFrame.pack(side=BOTTOM, fill=X)
+
+
+    top.mainloop()
 
 ################################### Startup ####################################
 # __name__
@@ -362,8 +518,9 @@ if __name__=="__main__":
     parser.add_argument('-g','--gui', action='store_true',
                         help='Include to run with GUI. Default is command line.')
     args = vars(parser.parse_args(sys.argv[1:]))
-    print(args)
+    # print(args)
     if args['gui']:
+        print("Starting GUI")
         guiMain(args)
     else:
         cmdMain(args)
